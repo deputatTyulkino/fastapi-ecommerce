@@ -20,8 +20,6 @@ async def get_all_products(db: Session = Depends(get_db)):
     products = db.scalars(
         select(Product).where(Product.is_active == True)
     ).all()
-    if products is None:
-        return []
     return products
 
 
@@ -30,16 +28,16 @@ async def create_product(product: ProductCreate, db: Session = Depends(get_db)):
     """
     Создаёт новый товар.
     """
-    if product.category_id is not None:
-        bd_category = db.scalars(
-            select(Category).where(
-                Category.id == product.category_id, Category.is_active == True
-            )
-        ).first()
-        if bd_category is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail='Category not found or inactive'
-            )
+    bd_category = db.scalars(
+        select(Category).where(
+            Category.id == product.category_id, Category.is_active == True
+        )
+    ).first()
+    if not bd_category:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail='Category not found or inactive'
+        )
+
     db_product = Product(**product.model_dump())
     db.add(db_product)
     db.commit()
@@ -55,7 +53,7 @@ async def get_product(product_id: int, db: Session = Depends(get_db)):
     db_product = db.scalars(
         select(Product).where(Product.id == product_id, Product.is_active == True)
     ).first()
-    if db_product is None:
+    if not db_product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail='Product not found or inactive'
         )
@@ -64,7 +62,7 @@ async def get_product(product_id: int, db: Session = Depends(get_db)):
             Category.id == db_product.category_id, Category.is_active == True
         )
     ).first()
-    if bd_category is None:
+    if not bd_category:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail='Category not found or inactive'
         )
@@ -79,12 +77,14 @@ async def get_products_by_category(category_id: int, db: Session = Depends(get_d
     db_category = db.scalars(
         select(Category).where(Category.id == category_id, Category.is_active == True)
     ).first()
-    if db_category is None:
+    if not db_category:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail='Category not found or inactive'
         )
     products = db.scalars(
-        select(Product).where(Product.category_id == category_id, Product.is_active == True)
+        select(Product).where(
+            Product.category_id == category_id, Product.is_active == True
+        )
     ).all()
     return products
 
@@ -97,7 +97,7 @@ async def update_product(product_id: int, product: ProductCreate, db: Session = 
     db_product = db.scalars(
         select(Product).where(Product.id == product_id, Product.is_active == True)
     ).first()
-    if db_product is None:
+    if not db_product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail='Product not found or inactive'
         )
@@ -106,7 +106,7 @@ async def update_product(product_id: int, product: ProductCreate, db: Session = 
             Category.id == db_product.category_id, Category.is_active == True
         )
     ).first()
-    if db_category is None:
+    if not db_category:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail='Category not found or inactive'
         )
@@ -126,7 +126,7 @@ async def delete_product(product_id: int, db: Session = Depends(get_db)):
     db_product = db.scalars(
         select(Product).where(Product.id == product_id, Product.is_active == True)
     ).first()
-    if db_product is None:
+    if not db_product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     db.execute(
         update(Product).where(Product.id == product_id).values(is_active=False)
