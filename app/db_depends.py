@@ -1,15 +1,9 @@
-from app.database import SessionLocal
-from sqlalchemy.orm import Session
-from collections.abc import Generator
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import async_session
+from collections.abc import AsyncGenerator
 
 
-def get_db() -> Generator[Session, None, None]:
-    """
-    Зависимость для получения сессии базы данных.
-    Создаёт новую сессию для каждого запроса и закрывает её после обработки.
-    """
-    db: Session = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with async_session() as session:
+        yield session
