@@ -42,6 +42,7 @@ async def create_product(product: ProductCreate, db: AsyncSession = Depends(get_
     db_product = Product(**product.model_dump())
     db.add(db_product)
     await db.commit()
+    await db.refresh(db_product)
     return db_product
 
 
@@ -110,6 +111,7 @@ async def update_product(product_id: int, product: ProductCreate, db: AsyncSessi
         update(Product).where(Product.id == product_id).values(**product.model_dump())
     )
     await db.commit()
+    await db.refresh(db_product)
     return db_product
 
 
