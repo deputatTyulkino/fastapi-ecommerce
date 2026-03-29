@@ -1,10 +1,12 @@
+import jwt
 from fastapi import APIRouter, status, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import hash_password, verify_password, create_access_token
+from app.auth import hash_password, verify_password, create_access_token, create_refresh_token
+from app.config import SECRET_KEY, ALGORITHM
 from app.db_depends import get_db
-from app.schemas.users import User as UserSchema, UserCreate
+from app.schemas.users import User as UserSchema, UserCreate, RefreshTokenRequest
 from sqlalchemy import select
 from app.models.users import User as UserModel
 
@@ -53,9 +55,53 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
     access_token = create_access_token(
         data={'sub': user.email, 'role': user.role, 'id': user.id}
     )
+    refresh_token = create_refresh_token(
+        data={'sub': user.email, 'role': user.role, 'id': user.id}
+    )
     returned_user = {
         'id': user.id,
         'email': user.email,
         'role': user.role
     }
-    return {'access_token': access_token, 'user': returned_user}
+    return {
+        'access_token': access_token, 'refresh_token': refresh_token, 'user': returned_user
+    }
+
+
+@router.post('/refresh-token')
+async def refresh_token(body: RefreshTokenRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Обновляет refresh и access токены, принимая старый refresh-токен в теле запроса.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate refresh token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    old_refresh_token = body.refresh_token
+    try:
+        payload = jwt.decode(old_refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str | None = payload.get('sub')
+        token_type: str | None = payload.get('token_type')
+        if email is None or token_type != 'refresh':
+            raise credentials_exception
+    except jwt.ExpiredSignatureError:
+        raise credentials_exception
+    except jwt.PyJWTError:
+        raise credentials_exception
+
+    user = (await db.scalars(
+        select(UserModel).where(UserModel.email == email, UserModel.is_active == True)
+    )).first()
+    if user is None:
+        raise credentials_exception
+    new_refresh_token = create_refresh_token(
+        data={"sub": user.email, "role": user.role, "id": user.id}
+    )
+    new_access_token = create_access_token(
+        data={"sub": user.email, "role": user.role, "id": user.id}
+    )
+    return {
+        'refresh_token': new_refresh_token,
+        'access_token': new_access_token
+    }
