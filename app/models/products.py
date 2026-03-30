@@ -8,6 +8,7 @@ from sqlalchemy import Integer, String, Numeric, Boolean, ForeignKey
 if TYPE_CHECKING:
     from .categories import Category
     from .users import User
+    from .reviews import Review
 
 
 class Product(Base):
@@ -27,3 +28,4 @@ class Product(Base):
         "Category", back_populates='products'
     )
     seller: Mapped['User'] = relationship('User', back_populates='products')
+    reviews: Mapped['Review'] = relationship('Review', back_populates='product')
