@@ -17,10 +17,9 @@ async def get_all_categories(db: AsyncSession = Depends(get_db)):
     """
     Возвращает список всех категорий товаров.
     """
-    stmt = await db.scalars(
+    categories = (await db.scalars(
         select(Category).where(Category.is_active == True)
-    )
-    categories = stmt.first()
+    )).all()
     return categories
 
 
