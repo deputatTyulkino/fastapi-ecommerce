@@ -1,10 +1,9 @@
-from app.database import Base
-from pydantic import Field, ConfigDict
+from pydantic import Field, ConfigDict, BaseModel
 
 from app.schemas.products import Product
 
 
-class CartItemBase(Base):
+class CartItemBase(BaseModel):
     product_id: int = Field(description='ID товара')
     quantity: int = Field(description='Количество товара')
 
