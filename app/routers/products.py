@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func, desc
+from sqlalchemy.sql.operators import or_
 
 from app.auth import get_current_seller
 from app.db_depends import get_db
 from app.models.categories import Category
 from app.models.products import Product
-from app.schemas.products import ProductCreate, Product as ProductSchema
+from app.schemas.products import ProductCreate, Product as ProductSchema, ProductList
 from app.models.users import User as UserModel
 
 router = APIRouter(
@@ -15,16 +16,84 @@ router = APIRouter(
 )
 
 
-@router.get('/', response_model=list[ProductSchema])
-async def get_all_products(db: AsyncSession = Depends(get_db)):
+@router.get('/', response_model=ProductList)
+async def get_all_products(
+        page: int = Query(1, ge=1),
+        page_size: int = Query(20, ge=1, le=100),
+        search: str | None = Query(None, min_length=1, description='Поиск по названию товара'),
+        category_id: int | None = Query(None, description='ID категории для фильтрации'),
+        min_price: float | None = Query(None, description='Минимальная цена товара'),
+        max_price: float | None = Query(None, description='Максимальная цена товара'),
+        is_stock: bool | None = Query(
+            None, description='true — только товары в наличии, false — только без остатка'
+        ),
+        seller_id: int | None = Query(None, description='ID продавца для фильтрации'),
+        db: AsyncSession = Depends(get_db)
+):
     """
     Возвращает список всех товаров.
     """
-    stmt = await db.scalars(
-        select(Product).where(Product.is_active == True)
-    )
-    products = stmt.all()
-    return products
+    if min_price is not None and max_price is not None and min_price > max_price:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='min_price не может быть больше max_price'
+        )
+    filters = [Product.is_active == True]
+    if category_id is not None:
+        filters.append(Product.category_id == category_id)
+    if seller_id is not None:
+        filters.append(Product.seller_id == seller_id)
+    if min_price is not None:
+        filters.append(Product.price >= min_price)
+    if max_price is not None:
+        filters.append(Product.price <= max_price)
+    if is_stock is not None:
+        filters.append(Product.stock > 0 if is_stock else Product.stock == 0)
+
+    total_stmt = select(func.count()).select_from(Product).where(*filters)
+
+    rank_col = None
+    if search:
+        search_value = search.strip()
+        if search_value:
+            ts_query_en = func.websearch_to_tsquery('english', search_value)
+            ts_query_ru = func.websearch_to_tsquery('russian', search_value)
+            ts_query = or_(
+                Product.tsv.op('@@')(ts_query_en),
+                Product.tsv.op('@@')(ts_query_ru)
+            )
+            filters.append(ts_query)
+            rank_col = func.greatest(
+                func.ts_rank_cd(Product.tsv, ts_query_en),
+                func.ts_rank_cd(Product.tsv, ts_query_ru)
+            ).label('rank')
+            total_stmt = select(func.count()).select_from(Product).where(*filters)
+
+    total = await db.scalar(total_stmt) or 0
+
+    if rank_col is not None:
+        products_stmt = (await db.scalars(
+            select(Product, rank_col)
+            .where(*filters)
+            .order_by(desc(rank_col), Product.id)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )).all()
+        products = [pr[0] for pr in products_stmt]
+    else:
+        products = (await db.scalars(
+            select(Product)
+            .where(*filters)
+            .order_by(Product.id)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )).all()
+    return {
+        'items': products,
+        'total': total,
+        'page': page,
+        'page_size': page_size
+    }
 
 
 @router.post('/', response_model=ProductSchema, status_code=status.HTTP_201_CREATED)
