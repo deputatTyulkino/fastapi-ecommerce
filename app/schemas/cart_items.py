@@ -10,7 +10,7 @@ class CartItemBase(BaseModel):
 
 class CartItemCreate(CartItemBase):
     """Модель для добавления нового товара в корзину."""
-
+    pass
 
 class CartItemUpdate(CartItemBase):
     """Модель для обновления количества товара в корзине."""
