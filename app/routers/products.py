@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, Path, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, desc
 from sqlalchemy.sql.operators import or_
@@ -10,10 +12,44 @@ from app.models.products import Product
 from app.schemas.products import ProductCreate, Product as ProductSchema, ProductList
 from app.models.users import User as UserModel
 
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+MEDIA_ROOT = BASE_DIR / "media" / "products"
+MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_IMAGE_SIZE = 2 * 1024 * 1024
+
 router = APIRouter(
     prefix='/products',
     tags=['products']
 )
+
+
+async def save_product_image(file: UploadFile) -> str:
+    """
+    Сохраняет изображение товара и возвращает относительный URL.
+    """
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, 'Only JPG, PNG or WebP images are allowed')
+    content = await file.read()
+    if len(content) > MAX_IMAGE_SIZE:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, 'Image is too large')
+    extension = Path(file.filename or '').suffix.lower() or '.jpg'
+    file_name = f'{uuid.uuid4()}{extension}'
+    file_path = MEDIA_ROOT / file_name
+    file_path.write_bytes(content)
+    return f'/media/products/{file_name}'
+
+
+async def remove_product_image(url: str | None) -> None:
+    """
+    Удаляет файл изображения, если он существует.
+    """
+    if not url:
+        return
+    relative_path = url.lstrip('/')
+    file_path = BASE_DIR / relative_path
+    if file_path.exists():
+        file_path.unlink()
 
 
 @router.get('/', response_model=ProductList)
@@ -98,7 +134,8 @@ async def get_all_products(
 
 @router.post('/', response_model=ProductSchema, status_code=status.HTTP_201_CREATED)
 async def create_product(
-        product: ProductCreate,
+        product: ProductCreate = Depends(ProductCreate.as_form),
+        image: UploadFile | None = File(None),
         db: AsyncSession = Depends(get_db),
         current_user: UserModel = Depends(get_current_seller)
 ):
@@ -115,7 +152,10 @@ async def create_product(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail='Category not found or inactive'
         )
-    db_product = Product(**product.model_dump(), seller_id=current_user.id)
+    image_url = await save_product_image(image) if image else None
+    db_product = Product(
+        **product.model_dump(), seller_id=current_user.id, image_url=image_url
+    )
     db.add(db_product)
     await db.commit()
     await db.refresh(db_product)
@@ -163,7 +203,8 @@ async def get_products_by_category(category_id: int, db: AsyncSession = Depends(
 @router.put("/{product_id}", response_model=ProductSchema, status_code=status.HTTP_200_OK)
 async def update_product(
         product_id: int,
-        product: ProductCreate,
+        product: ProductCreate = Depends(ProductCreate.as_form),
+        image: UploadFile | None = File(None),
         db: AsyncSession = Depends(get_db),
         current_user: UserModel = Depends(get_current_seller)
 ):
@@ -195,6 +236,9 @@ async def update_product(
     await db.execute(
         update(Product).where(Product.id == product_id).values(**product.model_dump())
     )
+    if image:
+        await remove_product_image(db_product.image_url)
+        db_product.image_url = await save_product_image(image)
     await db.commit()
     await db.refresh(db_product)
     return db_product
@@ -220,7 +264,7 @@ async def delete_product(
             status_code=status.HTTP_403_FORBIDDEN, detail='You can only delete your own products'
         )
     await db.execute(
-        update(Product).where(Product.id == product_id).values(is_active=False)
+        update(Product).where(Product.id == product_id).values(image_url=None, is_active=False)
     )
     await db.commit()
     return {"status": "success", "message": "Product marked as inactive"}
