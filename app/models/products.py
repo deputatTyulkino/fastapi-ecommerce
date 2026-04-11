@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .users import User
     from .reviews import Review
     from .cart_items import CartItem
+    from .orders import OrderItem
 
 
 class Product(Base):
@@ -60,6 +61,7 @@ class Product(Base):
     cart_item: Mapped['CartItem'] = relationship(
         'CartItem', back_populates='product', cascade='all, delete-orphan'
     )
+    order_items: Mapped[list['OrderItem']] = relationship('OrderItem', back_populates='product')
 
     __table_args__ = (
         Index('idx_products_tsv_gin', 'tsv', postgresql_using='gin'),
