@@ -32,3 +32,10 @@ class OrderList(BaseModel):
     page: int = Field(ge=1, description="Текущая страница")
     page_size: int = Field(ge=1, description="Размер страницы")
     model_config = ConfigDict(from_attributes=True)
+
+
+class OrderStatusResponse(BaseModel):
+    order_id: int
+    status: str
+    paid_at: datetime
+    message: str
